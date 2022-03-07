@@ -1,0 +1,395 @@
+---
+title: "PRÁCTICA PUNTUABLE EN R (BIOESTADÍSTICA/(WDBC))"
+author: "Leonardo Madsen"
+date: "6/1/2021"
+output:
+  pdf_document: default
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+    Cargamos librerías
+
+```{r libraries, message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(DescTools)
+library(lmtest)
+```
+
+    Leemos la tabla de datos
+
+```{r read.table}
+WDBC <- read.table(file.path("./WDBC.dat"), header=TRUE, sep = "\t")
+```
+
+    Eliminamos las columnas "id", "..._se" y "..._worst"
+
+```{r drop.columns}
+WDBC <- WDBC[, -grep("id|_se|_worst", colnames(WDBC))]
+```
+```{r edit.colnames}
+colnames(WDBC) <- gsub('_mean', '', colnames(WDBC), fixed=TRUE)
+```
+```{r edit.diag}
+WDBC$diagnosis <- as.factor(recode(WDBC$diagnosis, B = "Benigno", M = "Maligno"))
+```
+
+    Sumario de los datos que utilizaremos
+
+```{r summary.WDBC}
+summary(WDBC)
+```
+
+    Recuento de diagnosis
+
+```{r count.diag}
+count.diag <- count(WDBC, diagnosis)
+count.diag
+```
+
+
+```{r}
+pie<- ggplot(count.diag, aes(x="", y=n, fill=diagnosis)) + 
+  geom_bar(width = 1, stat = "identity") + 
+  coord_polar("y", start=0) +
+  geom_text(aes(y = n/2 + c(cumsum(n)[-length(n)], 0), 
+            label = n), size=5) +
+  ggtitle("Proporción en diagnóstico")
+pie
+```
+
+# 1. Seleccionar aleatoriamente una muestra sin reemplazamiento de 50 individuos de cada diagnóstico.
+
+```{r seed}
+set.seed(1832)
+```
+
+    Selección aleatoria
+
+```{r}
+
+df <- WDBC %>% 
+  group_by(diagnosis) %>%
+  slice_sample(n = 50, replace = FALSE)
+df
+```
+
+    Comprobamos resultado de la selección aleatoria
+
+```{r count.diag.50}
+df %>% count(diagnosis)
+```
+
+    Decripción de los datos seleccionados
+
+```{r}
+Desc(df)
+```
+
+```{r}
+quant.03area = quantile(df$area,0.333)
+print(quant.03area)
+```
+
+
+```{r}
+quant.06area = quantile(df$area,0.666)
+print(quant.06area)
+```
+
+    Categorizamos la variable "area" en tres categorías cada una de un tercio de la cantidad de los datos
+
+```{r}
+df[,"area.categorica"] = cut(df$area, breaks = c(min(df$area), quant.03area, quant.06area, max(df$area)),
+    labels = c("Pequeña", "Media", "Grande"),
+    include.lowest = TRUE)
+
+df$area.categorica <- as.factor(df$area.categorica)
+
+table(df$area.categorica)
+```
+
+    Categorizamos la variable "texture" en dos categorías divididas según la media
+
+```{r}
+df[,"textura.categorica"] = cut(df$texture, 
+                     breaks = c(min(df$texture), mean(df$texture), max(df$texture)), 
+                     labels = c("Claro", "Oscuro"),
+                     include.lowest = TRUE)
+
+df$textura.categorica <- as.factor(df$textura.categorica)
+
+table(df$textura.categorica)
+```
+
+# Análisis inferencial.
+
+## En todos los apartados que siguen especificar con detalle las hipótesis de los test, los cálculos hechos y las conclusiones. Considerar una de las variables continuas del conjunto de datos en la que sea posible asumir normalidad. Asumiendo normalidad:
+
+## a. ¿Entre qué valores se mueve la media de la distribución con una confianza del 95%? Suponer varianza desconocida. Interpretar los resultados.
+
+    Shapiro
+    
+```{r}
+shapiro.test(df$texture)
+```
+
+    Nuestro p-value = 0.6773 es mayor al nivel de confianza fijado (0.05) por lo cual no hay evidencias para rechazar la hipótesis nula (H0: la muestra proviene de una distribución normal). Por lo tanto podemos asegurar al 95% que los datos de esta variable se distribuyen según una Normal
+
+```{r}
+IC=t.test(df$texture, conf.level = 0.95)
+IC$conf.int
+```
+
+    La media de la distribución de la variable "texture" se mueve entre los valores 18.63809 y 20.15371 con una confianza del 95%
+
+```{r}
+shapiro.test(df$perimeter)
+```
+
+    Nuestro p-value = 0.02054 es menor al nivel de confianza fijado (0.05) por lo cual sí hay evidencias para rechazar la hipótesis nula (H0: la muestra proviene de una distribución normal). Por lo tanto podemos asegurar al 95% que los datos de esta la variable "perimeter" no distribuyen según una Normal
+
+
+## b. Hacer un contraste sobre la media de nivel 0.1 tomando como hipótesis nula el extremo superior del intervalo bilateral del apartado a. Dar el p‐valor e interpretar el resultado.
+
+```{r}
+limite_sup= IC$conf.int[2]
+t.test(df$texture, alternative='two.sided',
+       conf.level=0.9, mu=limite_sup)
+```
+
+    H0: mu=20.15371 y dado que el p-value = 0.05 es menor al nuestro nivel de confianza (0.1) sí hay evidencias para rechazar esta hipoteisis y declarar que la media de la variable es distinta de 20.15371
+
+
+## Considerar esa misma variable cuantitativa y una variable cualitativa con dos niveles. Suponiendo normalidad:
+
+## c.Hacer un contraste de igualdad de varianzas a nivel 0.05. Dar el p‐valor e interpretar el resultado. 
+
+
+    HOMOCEDASTICIDAD Es la homogeneidad de varianza de la variable dependiente entre los grupos. 
+    
+```{r}
+bartlett.test(df$texture~df$area.categorica)
+```
+
+    Interpretación: 
+    Con un p-value = 0.499, mayor de 0.05, no podemos rechazar la hipótesis nula. Por lo tanto suponemos homogeneidad de varianzas de las variables "texture" y "area.categorica".
+
+```{r}
+bartlett.test(df$texture~df$diagnosis)
+```
+      
+    Interpretación: 
+    Con un p-value = 0.7341, mayor de 0.05, no podemos rechazar la hipótesis nula. Por lo tanto suponemos homogeneidad de varianzas de las variables "texture" y "diagnosis".
+
+## d. Hacer un contraste de comparación de medias con varianzas desconocidas, dar el p‐valor e interpretar el resultado
+
+```{r}
+t.test(df$texture~df$diagnosis)
+```
+
+    Hay evidencias para rechazar la hipótesis de igualdad de medias debido a que p-value = 1.344e-06 es menor a 0.05. Por lo que la media de "textura.categorica"  del grupo "diagnosis Benigno" (17.6418) es inferior a la media de "textura.categorica" del grupo "diagnosis Maligno" (21.15) 
+ 
+
+## f. Hacer un contraste chi‐cuadrado. Dar el p‐valor e interpretar el resultado.
+
+```{r}
+table(df$diagnosis,df$area.categorica)
+```
+
+    Comprobamos las siguientes hipótesis
+    H0: No existe relación entre diagnosis y textura.categorica
+    H1: Si existe relación entre diagnosis y textura.categorica
+
+```{r}
+chisq.test(table(df$diagnosis,df$textura.categorica))
+```
+
+    Puesto que p-value = 1.078e-05 es menor a 0.05, no hay evidencias para aceptar H0, por lo que concluímos H1:sí hay relación entre la "diagnosis" y la "textura.categorica"
+
+    Comprobamos las siguientes hipótesis
+    H_0: No existe relación entre diagnosis y area.categorica
+    H_1: Si existe relación entre diagnosis y area.categorica
+
+```{r}
+chisq.test(table(df$diagnosis,df$area.categorica))
+```
+
+    Puesto que p-value = 7.36e-13 es menor a 0.05, no hay evidencias para aceptar H0, por lo que concluímos H1:sí hay relación entre la "diagnosis" y la "area.categorica"
+
+
+## g. Calcular una medida de asociación junto con un intervalo de confianza del 95%. Interpretar los resultados.
+
+```{r}
+diag_tex_tb <- table(df$textura.categorica,df$diagnosis)
+diag_tex_tb
+```
+
+    El odds ratio (OR) expresa si la probabilidad de ocurrencia del evento Benigno/Maligno difiere o no en los grupos Claro/Oscuro
+
+```{r OddsRatio}
+res <- OddsRatio(diag_tex_tb, conf.level=0.95)
+res
+```
+
+    Vemos que la fuerza de asociación es alta.
+    Entre los casos de "textura.categorica" "Claro"  hay  7 veces más "diagnosis Benigno" por cada "diagnosis Maligno".
+    El intervalo de confianza al 95% es (3.025323, 17.704917) 
+
+
+# 4. ANOVA y Regresión:
+
+##  a. Categorizar, en tres grupos, una de las variables cuantitativas medidas en las imágenes y llevar a cabo un ANOVA.
+
+
+```{r}
+boxplot(df$texture ~ df$area.categorica)
+```
+
+    A simple vista podríamos intuir que la media de "texture" con iguales en las tres categorías de área.
+
+    Procedemos con una prueba paramétrica ANOVA
+```{r}
+aov1 <-aov(df$texture ~ df$area.categorica)
+summary(aov1)
+```
+
+    El nivel de significancia Pr(>F)=0.00413 es menor que "0.05" por lo que hay evidencias para rechazar "H0: las medias son iguales", lo que indica que las medias son diferentes. 
+    Aun no sabemos cuál media es diferente de cuál. aunque podemos intuir que son las medias de "area pequeña" y "area grande" las que son diferentes entre si. 
+
+    Realizamos la prueba de Tukey
+```{r}
+TukeyHSD(aov1)
+```
+
+    Puesto que "Grande-Pequeña" p adj = 0.0034 es menor a 0.05 podemos corroborar que las medias de Grande y Pequeña son significativamente distintas
+
+
+
+
+
+## b. Efectuar un análisis de regresión lineal simple de dos de las variables continuas del conjunto de datos.
+### I. Dar la ecuación del modelo. Interpretar el modelo.
+
+
+```{r}
+model0 <- lm(formula =  area ~ texture, data = df)
+summary(model0)
+```
+
+    Interpretación:
+    
+    El área está linealmente relacionada con la textura según la siguiente fórmula:
+$area = 242.972 + 24.498 * texture$
+    
+    La ordenada en el origen (Intercept) es 242.972 por lo que valores de textura igual a 0 estimarán valores de área igual a 242.972.
+    La pendiente es 24.498 por lo que cada aumento medio en una unidad de textura producirá un aumento de 24.498 de area.
+    El estadístico F ( 7.796) contrasta si el modelo tiene significativa capacidad predictiva. 
+    En el contraste la hipótesis nula es F = 1, con un p-valor menor de 0.05 (p-value: 0.006296) se rechaza la hipótesis nula. Por lo tanto concluimos que el modelo tiene una capacidad predictiva significativa.
+
+
+### II. Estudiar la significación del modelo y la bondad de ajuste.
+
+    Se muestra un valor del estadístico de contraste F de  7.796  con un  p_valor = 0.006296. Deduciendo que a un nivel de significación del  5%, (p_valor < 0.05), rechazamos la hipótesis nula, y podemos concluir que el modelo lineal es adecuado para nuestro conjunto de datos.
+    Respecto a la bondad del ajuste, el coeficiente de determinación  R² tiene un valor de 0.07369, indica que el 7.36% de toda la variabilidad que tiene el fenómeno relativo al "area" puede ser explicado por la "texture".
+
+
+### III. Hacer un análisis residual, incluir los gráficos apropiados y estudiar la adecuación del modelo.
+
+    Realizaremos el diagnóstico de los residuos. Normalidad de los residuos, homogeneidad de varianzas e incorrelación de los residuos
+    
+```{r}
+shapiro.test(model0$residuals)
+```
+  
+      El Shapiro-Wilk normality test nos indica que no hay evidencias para aceptar la hipótesis nula (H0:los residuos se distribuye según una Normal). Por lo cual No se cumple una de las hipótesis fundamentales del modelo de regresión, el de normalidad de residuos
+
+```{r}
+model0.stdres <- rstandard(model0) 
+qqnorm(model0.stdres,  ylab="Standardized Residuals", xlab="Normal Scores") 
+qqline(model0.stdres)
+```
+```{r}
+bptest(model0)
+```
+
+    Interpretación: 
+    Con un p-value =  0.1056, mayor de 0.05, no podemos rechazar la hipótesis nula. Por lo tanto suponemos homogeneidad de varianzas en los residuos.
+
+
+```{r}
+dwtest(model0)
+```
+      
+    Interpretación: 
+    Con un p-value = 3.698e-05, menor de 0.05, hay indicios para rechazar la hipótesis nula. Por lo tanto no suponemos incorrelación para los residuos estudentizados del modelo ajustado.
+
+```{r}
+plot(model0)
+```
+
+### IV.Si el modelo no es apropiado tratar de encontrar transformaciones que corrijan el modelo obteniendo un modelo aceptable.
+
+```{r}
+model1 <- lm(formula =  area ~ I(texture^2), data = df)
+model2 <- lm(formula =  area ~ log(texture), data = df)
+model3 <- lm(formula =  area ~ I(texture^(-1)), data = df)
+model_cuadratico <- lm(formula =  area ~ poly(texture, 1), data = df)
+model_cuadratico2 <- lm(formula =  area ~ poly(texture, 2), data = df)
+```
+
+```{r}
+ anova(model0, model1)
+```
+```{r}
+ anova(model0, model3)
+```
+
+```{r}
+anova(model0, model_cuadratico)
+```
+
+```{r}
+anova(model0, model_cuadratico2)
+```
+
+    Tratando de encontrar transformaciones que mejore el modelo no hemos obteniendo un modelo aceptable.
+
+    Comparamos los modelos siguiendo el criterio de información de Akaike 
+    
+```{r}
+cbind(model0=AIC(model0), model1=AIC(model1), model2=AIC(model2), model3=AIC(model3), model_cuadratico=AIC(model_cuadratico), model_cuadratico2=AIC(model_cuadratico2))
+```
+
+    Según este criterio el mejor modelo es el que contiene la transformación logarítmica de la variable texture. 
+
+## c. A partir de la variable diagnosis , ajustar un modelo que nos permita predecir la probabilidad de tener un tumor maligno. El modelo debe incluir al menos 5 variables independientes. Identifica e interpreta factores de riesgo/protección.
+
+
+    Convertimos la variable "diagnosis" a  numérico (Benigno = 0, Maligno = 1)
+
+```{r}
+df$diagnosis.fac <- c(rep(0,50),rep(1,50))
+```
+
+```{r}
+model.m <- lm(formula =  diagnosis.fac ~ I(perimeter^2) + radius + texture  + concavity + area, data = df)
+summary(model.m)
+```
+
+
+    Interpretación:
+    diagnosis está linealmente relacionada con perimeter, radius, texture, concavity y area según la siguiente fórmula:
+$diagnosis = -1.811 -3.130e^{-4} * perimeter^2 + 1.223e^{-1} * radius + 3.378e^{-2} * texture + 4.679 * concavity + 3.436e^{-3} * area$
+
+    El estadístico F (59.32) contrasta si el modelo tiene significativa capacidad predictiva. 
+    En el contraste la hipótesis nula es F = 1, con un p-valor menor de 0.05 (p-value: < 2.2e-16) se rechaza la hipótesis nula. Por lo tanto concluimos que el modelo tiene una capacidad predictiva significativa.
+    El R2 ajustado = 0.7465 , lo que significa que “perimeter, radius, texture, concavity y area pueden predecir el 74% de la varianza en la estimación de diagnosis. 
+    Los coeficiente de las variables radius, texture, concavity y area son positivos por tanto  corresponden a factores de riesgo.
+    Por el contrario, el coeficiente de perimeter^2 es negativo por lo que se trata de un factor de protección
